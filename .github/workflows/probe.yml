@@ -36,6 +36,9 @@ jobs:
               except (subprocess.TimeoutExpired, FileNotFoundError) as error:
                   print(json.dumps({"status": "SIGNING_UNAVAILABLE", "reason": type(error).__name__}))
                   raise SystemExit(1)
+              import re
+              diagnostic = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+", "[redacted-email]", result.stderr.replace(str(root), "[temporary-probe-directory]"))
+              print(json.dumps({"signing_error": diagnostic[:2500]}))
               data = target.read_bytes() if target.exists() else b""
               print(json.dumps({"status": "SIGNED_AEA" if data.startswith(b"AEA1") else "NOT_SIGNED",
                   "exit_code": result.returncode, "bytes": len(data),
