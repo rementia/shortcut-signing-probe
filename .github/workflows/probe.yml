@@ -1,0 +1,46 @@
+name: Generic Shortcuts signing probe
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  probe:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: macos-15
+    timeout-minutes: 3
+    steps:
+      - name: Sign generic in-memory-generated shortcut without running it
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess, tempfile
+          workflow = {
+              "WFWorkflowMinimumClientVersion": 900,
+              "WFWorkflowClientVersion": "5037.111",
+              "WFWorkflowName": "Signing availability probe",
+              "WFWorkflowActions": [{
+                  "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+                  "WFWorkflowActionParameters": {"Text": "Generic signing probe. No alarms or network actions."}
+              }],
+              "WFWorkflowTypes": [], "WFWorkflowImportQuestions": [],
+              "WFWorkflowInputContentItemClasses": [], "WFWorkflowOutputContentItemClasses": []
+          }
+          import plistlib
+          with tempfile.TemporaryDirectory(prefix="shortcut-signing-probe-") as root:
+              source = pathlib.Path(root) / "probe.plist"
+              target = pathlib.Path(root) / "probe.shortcut"
+              source.write_bytes(plistlib.dumps(workflow, fmt=plistlib.FMT_XML))
+              try:
+                  result = subprocess.run(["/usr/bin/shortcuts", "sign", "--mode", "anyone",
+                      "--input", str(source), "--output", str(target)],
+                      capture_output=True, text=True, timeout=90)
+              except (subprocess.TimeoutExpired, FileNotFoundError) as error:
+                  print(json.dumps({"status": "SIGNING_UNAVAILABLE", "reason": type(error).__name__}))
+                  raise SystemExit(1)
+              data = target.read_bytes() if target.exists() else b""
+              print(json.dumps({"status": "SIGNED_AEA" if data.startswith(b"AEA1") else "NOT_SIGNED",
+                  "exit_code": result.returncode, "bytes": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest() if data else None,
+                  "icloud_mentioned_in_error": "icloud" in result.stderr.lower(),
+                  "shortcut_executed": False, "artifact_uploaded": False}))
+              raise SystemExit(0 if result.returncode == 0 and data.startswith(b"AEA1") else 1)
+          PY
